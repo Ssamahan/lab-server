@@ -1,5 +1,5 @@
 /**
- * Ruli Lab Systems - Free Secure Server v1.3 - Email OTP via Nodemailer
+ * Ruli Lab Systems - Free Secure Server v1.3.1 - Email OTP + Alert reminders
  */
 import express from 'express';
 import cors from 'cors';
@@ -126,7 +126,7 @@ function authRequired(req, res, next) {
   try { req.user = jwt.verify(token, JWT_SECRET); next(); } catch (e) { return res.status(401).json({ error: 'Invalid token' }); }
 }
 
-app.get('/', (req, res) => res.json({ name: 'Ruli Lab Server', version: '1.3.0', status: 'online', dbType, emailConfigured: !!(EMAIL_USER && EMAIL_PASS), time: new Date().toISOString() }));
+app.get('/', (req, res) => res.json({ name: 'Ruli Lab Server', version: '1.3.1', status: 'online', dbType, emailConfigured: !!(EMAIL_USER && EMAIL_PASS), time: new Date().toISOString() }));
 app.get('/api/health', async (req, res) => {
   try { const count = await dbCount(); res.json({ ok: true, dbType, keys: count, persistent: dbType === 'postgres', emailConfigured: !!(EMAIL_USER && EMAIL_PASS), time: Date.now() }); } catch (e) { res.json({ ok: false, error: e.message }); }
 });
@@ -158,7 +158,7 @@ app.post('/api/send-otp', authRequired, async (req, res) => {
   const { toEmail, otp, purpose } = req.body || {};
   if (!toEmail || !otp) return res.status(400).json({ error: 'toEmail and otp required' });
   const transporter = getMailTransporter();
-  if (!transporter) return res.status(500).json({ error: 'Email not configured - set EMAIL_USER and EMAIL_PASS (Gmail App Password) in Render env' });
+  if (!transporter) return res.status(500).json({ error: 'Email not configured - set EMAIL_USER and EMAIL_PASS in Render env' });
   const subject = `Ruli Lab Systems — OTP ${otp} for ${purpose || 'login'}`;
   const html = `<div style="font-family:Trebuchet MS,sans-serif;max-width:600px;margin:0 auto;border:1px solid #e6e9f1;border-radius:12px;overflow:hidden"><div style="background:#0B1C3D;color:white;padding:20px;text-align:center"><h2 style="margin:0;color:#C9A84C">Ruli District Hospital</h2><div>Laboratory Department — Lab Systems</div></div><div style="padding:24px"><h3 style="color:#0B1C3D">Your OTP Code</h3><p>Your OTP for <b>${purpose || 'login'}</b> is:</p><div style="font-size:32px;font-weight:900;letter-spacing:6px;text-align:center;background:#F7F8FC;border:2px dashed #C9A84C;border-radius:10px;padding:16px;margin:16px 0;color:#0B1C3D">${otp}</div><p><b>Valid 5 minutes.</b></p><p style="color:#64748B;font-size:13px">Time: ${new Date().toLocaleString()}</p></div></div>`;
   try {
@@ -166,4 +166,17 @@ app.post('/api/send-otp', authRequired, async (req, res) => {
     res.json({ ok: true, messageId: info.messageId, to: toEmail });
   } catch (e) { res.status(500).json({ error: 'Email send failed: ' + e.message }); }
 });
-app.listen(PORT, () => console.log(`\n✅ Ruli Lab Server v1.3 online port ${PORT} dbType=${dbType} email=${!!(EMAIL_USER && EMAIL_PASS)}\n`));
+app.post('/api/send-alert', authRequired, async (req, res) => {
+  const { toEmail, subject, html, text } = req.body || {};
+  if (!toEmail) return res.status(400).json({ error: 'toEmail required' });
+  const transporter = getMailTransporter();
+  if (!transporter) return res.status(500).json({ error: 'Email not configured - set EMAIL_USER and EMAIL_PASS in Render env' });
+  const finalSubject = subject || `Ruli Lab — Alert — ${new Date().toLocaleDateString()}`;
+  const finalHtml = html || `<div style="font-family:Trebuchet MS,sans-serif;padding:20px"><h3 style="color:#0B1C3D">Ruli Lab Alert</h3><p>${text||'Alert'}</p><p style="color:#64748B">Time: ${new Date().toLocaleString()}</p></div>`;
+  try {
+    const info = await transporter.sendMail({ from: EMAIL_FROM, to: toEmail, subject: finalSubject, html: finalHtml, text: text || finalSubject });
+    console.log(`Alert email sent to ${toEmail} - ${info.messageId}`);
+    res.json({ ok: true, messageId: info.messageId, to: toEmail });
+  } catch (e) { res.status(500).json({ error: 'Email send failed: ' + e.message }); }
+});
+app.listen(PORT, () => console.log(`\n✅ Ruli Lab Server v1.3.1 online port ${PORT} dbType=${dbType} email=${!!(EMAIL_USER && EMAIL_PASS)}\n`));

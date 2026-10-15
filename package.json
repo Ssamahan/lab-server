@@ -1,7 +1,7 @@
 {
   "name": "ruli-lab-server",
-  "version": "1.3.0",
-  "description": "Free secure server for Ruli Lab - with Email OTP delivery via Nodemailer free Gmail SMTP + Postgres",
+  "version": "1.3.1",
+  "description": "Free secure server for Ruli Lab - with Email OTP + Alert reminders via Nodemailer free Gmail SMTP + Postgres",
   "main": "server.js",
   "type": "module",
   "scripts": {
