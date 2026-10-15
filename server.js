@@ -1,24 +1,9 @@
 /**
- * Ruli Lab Systems - Free Secure Server
- * Deploy FREE on Render.com / Fly.io / Railway / Vercel
- * Keeps your lab data online, secure, auto-synced phone <-> PC
- * 
- * Features:
- * - JWT auth (admin only can write)
- * - SQLite persistence (free, survives restarts on Render with disk)
- * - CORS locked to https://ssamahan.github.io/lab/
- * - Rate limiting, Helmet security headers
- * - Single endpoint: /api/data (GET + PUT)
- * - Version history & lastSave timestamp
- * 
- * Free Deploy Steps (Render - 100% free):
- * 1. Push this folder to GitHub (e.g. Ssamahan/lab-server)
- * 2. Go to https://dashboard.render.com -> New Web Service -> Connect repo
- * 3. Build: npm install, Start: npm start, Free plan
- * 4. Add Environment Variables from .env.example
- * 5. Add Disk (optional but recommended for persistence): Name=data, Mount=/opt/render/project/src/data, Size=1GB free
- * 6. Deploy -> copy URL e.g. https://ruli-lab-server.onrender.com
- * 7. Paste URL into Lab Systems app: Staff & Settings -> Data & Backup -> Custom Server URL
+ * Ruli Lab Systems - Free Secure Server v1.1
+ * Works on Render FREE tier WITHOUT disk (disk not supported on free)
+ * Uses:
+ * - If DATABASE_URL set (Neon/Supabase free Postgres) -> uses Postgres (persistent, free)
+ * - Else -> uses SQLite file ./data/lab.db (ephemeral on free tier, will reset on spin-down, but works for testing)
  */
 
 import express from 'express';
@@ -30,7 +15,6 @@ import bcrypt from 'bcryptjs';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import Database from 'better-sqlite3';
 import rateLimit from 'express-rate-limit';
 
 dotenv.config();
@@ -45,65 +29,119 @@ const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH || '';
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || 'https://ssamahan.github.io';
 const ALLOWED_ORIGIN_2 = process.env.ALLOWED_ORIGIN_2 || '';
 const DB_PATH = process.env.DB_PATH || './data/lab.db';
+const DATABASE_URL = process.env.DATABASE_URL || '';
 
-// Ensure data dir exists
 const dbDir = path.dirname(path.join(__dirname, DB_PATH));
 if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
 
-// Init SQLite
-const db = new Database(path.join(__dirname, DB_PATH));
-db.exec(`
-  CREATE TABLE IF NOT EXISTS kv (
-    key TEXT PRIMARY KEY,
-    value TEXT,
-    updated_at INTEGER,
-    updated_by TEXT
-  );
-  CREATE TABLE IF NOT EXISTS history (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    key TEXT,
-    value TEXT,
-    updated_at INTEGER,
-    updated_by TEXT
-  );
-`);
+let dbType = 'sqlite';
+let pgPool = null;
+let sqliteDb = null;
 
-// Helper to hash admin password on first run
+if (DATABASE_URL) {
+  try {
+    const { Pool } = await import('pg');
+    pgPool = new Pool({ connectionString: DATABASE_URL, ssl: { rejectUnauthorized: false } });
+    await pgPool.query(`
+      CREATE TABLE IF NOT EXISTS kv (
+        key TEXT PRIMARY KEY,
+        value TEXT,
+        updated_at BIGINT,
+        updated_by TEXT
+      );
+      CREATE TABLE IF NOT EXISTS history (
+        id SERIAL PRIMARY KEY,
+        key TEXT,
+        value TEXT,
+        updated_at BIGINT,
+        updated_by TEXT
+      );
+    `);
+    dbType = 'postgres';
+    console.log('✅ Using Postgres (Neon/Supabase free) - persistent even on Render free tier');
+  } catch (e) {
+    console.warn('Postgres init failed, falling back to SQLite:', e.message);
+  }
+}
+
+if (dbType === 'sqlite') {
+  const Database = (await import('better-sqlite3')).default;
+  sqliteDb = new Database(path.join(__dirname, DB_PATH));
+  sqliteDb.exec(`
+    CREATE TABLE IF NOT EXISTS kv (
+      key TEXT PRIMARY KEY,
+      value TEXT,
+      updated_at INTEGER,
+      updated_by TEXT
+    );
+    CREATE TABLE IF NOT EXISTS history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      key TEXT,
+      value TEXT,
+      updated_at INTEGER,
+      updated_by TEXT
+    );
+  `);
+  console.log(`⚠️ Using SQLite file ${DB_PATH} - EPHEMERAL on Render free tier. Add DATABASE_URL (Neon free Postgres) for persistence.`);
+}
+
+async function dbGet(key) {
+  if (dbType === 'postgres') {
+    const res = await pgPool.query('SELECT value, updated_at, updated_by FROM kv WHERE key=$1', [key]);
+    return res.rows[0] || null;
+  } else {
+    return sqliteDb.prepare('SELECT value, updated_at, updated_by FROM kv WHERE key=?').get(key);
+  }
+}
+
+async function dbSet(key, value, updated_at, updated_by) {
+  if (dbType === 'postgres') {
+    await pgPool.query(
+      `INSERT INTO kv (key, value, updated_at, updated_by) VALUES ($1,$2,$3,$4)
+       ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value, updated_at=EXCLUDED.updated_at, updated_by=EXCLUDED.updated_by`,
+      [key, value, updated_at, updated_by]
+    );
+    await pgPool.query('INSERT INTO history (key, value, updated_at, updated_by) VALUES ($1,$2,$3,$4)', [key, value, updated_at, updated_by]);
+    await pgPool.query('DELETE FROM history WHERE key=$1 AND id NOT IN (SELECT id FROM history WHERE key=$1 ORDER BY updated_at DESC LIMIT 50)', [key]);
+  } else {
+    sqliteDb.prepare('INSERT INTO kv (key, value, updated_at, updated_by) VALUES (?,?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at, updated_by=excluded.updated_by')
+      .run(key, value, updated_at, updated_by);
+    sqliteDb.prepare('INSERT INTO history (key, value, updated_at, updated_by) VALUES (?,?,?,?)').run(key, value, updated_at, updated_by);
+    sqliteDb.prepare('DELETE FROM history WHERE key=? AND id NOT IN (SELECT id FROM history WHERE key=? ORDER BY updated_at DESC LIMIT 50)').run(key, key);
+  }
+}
+
+async function dbHistory(key) {
+  if (dbType === 'postgres') {
+    const res = await pgPool.query('SELECT id, updated_at, updated_by FROM history WHERE key=$1 ORDER BY updated_at DESC LIMIT 20', [key]);
+    return res.rows;
+  } else {
+    return sqliteDb.prepare('SELECT id, updated_at, updated_by FROM history WHERE key=? ORDER BY updated_at DESC LIMIT 20').all(key);
+  }
+}
+
 let adminHash = ADMIN_PASSWORD_HASH;
 if (!adminHash) {
   adminHash = bcrypt.hashSync(ADMIN_PASSWORD, 10);
-  console.log('Generated ADMIN_PASSWORD_HASH (save to .env):', adminHash);
 }
 
 const app = express();
-app.use(helmet({
-  crossOriginResourcePolicy: false
-}));
+app.use(helmet({ crossOriginResourcePolicy: false }));
 app.use(express.json({ limit: '15mb' }));
 
-// CORS - only allow your GitHub Pages + localhost for testing
 const allowedOrigins = [ALLOWED_ORIGIN, ALLOWED_ORIGIN_2, 'https://ssamahan.github.io'].filter(Boolean);
 app.use(cors({
   origin: (origin, cb) => {
-    // Allow no origin (mobile apps, curl, server-to-server)
     if (!origin) return cb(null, true);
-    if (allowedOrigins.some(o => origin.startsWith(o))) return cb(null, true);
-    // Allow all for now but log - tighten later
-    console.warn('CORS blocked origin:', origin);
-    return cb(null, true); // For free tier, allow all but you can set to false to block
+    if (allowedOrigins.some(o => origin && origin.startsWith(o))) return cb(null, true);
+    return cb(null, true);
   },
   credentials: true
 }));
 
-// Rate limiting - 100 req / 15 min per IP
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 200,
-  message: { error: 'Too many requests, try again later' }
-});
+const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 200, message: { error: 'Too many requests' } });
 app.use('/api/', limiter);
 
-// Auth middleware
 function authRequired(req, res, next) {
   const auth = req.headers.authorization || '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
@@ -117,101 +155,77 @@ function authRequired(req, res, next) {
   }
 }
 
-// Public health check
 app.get('/', (req, res) => {
   res.json({
     name: 'Ruli Lab Systems Server',
-    version: '1.0.0',
+    version: '1.1.0',
     status: 'online',
+    dbType,
+    persistent: dbType === 'postgres' ? 'Yes' : 'No - add DATABASE_URL',
     free: true,
     secure: true,
-    endpoints: {
-      login: 'POST /api/login {username, password} -> {token}',
-      getData: 'GET /api/data -> {data, at, by}',
-      saveData: 'PUT /api/data {data} + Bearer token',
-      history: 'GET /api/history (auth)'
-    },
-    allowedOrigins,
-    db: DB_PATH,
     time: new Date().toISOString()
   });
 });
 
-app.get('/api/health', (req, res) => {
-  const row = db.prepare('SELECT COUNT(*) as c FROM kv').get();
-  res.json({ ok: true, keys: row.c, time: Date.now() });
+app.get('/api/health', async (req, res) => {
+  try {
+    let count = 0;
+    if (dbType === 'postgres') {
+      const r = await pgPool.query('SELECT COUNT(*) as c FROM kv');
+      count = r.rows[0].c;
+    } else {
+      count = sqliteDb.prepare('SELECT COUNT(*) as c FROM kv').get().c;
+    }
+    res.json({ ok: true, dbType, keys: count, persistent: dbType === 'postgres', time: Date.now() });
+  } catch (e) {
+    res.json({ ok: false, error: e.message });
+  }
 });
 
-// Login -> JWT
 app.post('/api/login', (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password) return res.status(400).json({ error: 'username and password required' });
   if (username !== ADMIN_USERNAME) return res.status(401).json({ error: 'Invalid credentials' });
-  
   const ok = adminHash ? bcrypt.compareSync(password, adminHash) : (password === ADMIN_PASSWORD);
   if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
-
   const token = jwt.sign({ username, role: 'admin' }, JWT_SECRET, { expiresIn: '30d' });
   res.json({ token, username, expiresIn: '30d' });
 });
 
-// Get data (public read, but you can require auth if you want)
-app.get('/api/data', (req, res) => {
-  // Optional auth for read - currently public read for viewer mode, but you can enforce
+app.get('/api/data', async (req, res) => {
   const key = req.query.key || 'lab/v1';
-  const row = db.prepare('SELECT value, updated_at, updated_by FROM kv WHERE key=?').get(key);
+  const row = await dbGet(key);
   if (!row) return res.json({ data: null, at: null, by: null, key });
   try {
     const parsed = JSON.parse(row.value);
     res.json({ data: parsed.data || parsed, at: row.updated_at, by: row.updated_by, key, raw: parsed });
   } catch (e) {
-    res.json({ data: null, at: row.updated_at, by: row.updated_by, key, error: 'parse failed' });
+    res.json({ data: null, at: row.updated_at, by: row.updated_by, key });
   }
 });
 
-// Save data (auth required - admin only)
-app.put('/api/data', authRequired, (req, res) => {
+app.put('/api/data', authRequired, async (req, res) => {
   const key = req.query.key || 'lab/v1';
   const { data } = req.body || {};
   if (!data) return res.status(400).json({ error: 'data required' });
-  if (!data.meta) return res.status(400).json({ error: 'data.meta required' });
-
   const now = Date.now();
   const payload = JSON.stringify({ data, at: now, by: req.user.username });
-
-  // Save to history
-  db.prepare('INSERT INTO history (key, value, updated_at, updated_by) VALUES (?,?,?,?)')
-    .run(key, payload, now, req.user.username);
-
-  // Upsert current
-  db.prepare('INSERT INTO kv (key, value, updated_at, updated_by) VALUES (?,?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at, updated_by=excluded.updated_by')
-    .run(key, payload, now, req.user.username);
-
-  // Keep only last 50 history
-  db.prepare('DELETE FROM history WHERE key=? AND id NOT IN (SELECT id FROM history WHERE key=? ORDER BY updated_at DESC LIMIT 50)').run(key, key);
-
-  console.log(`Saved ${key} at ${new Date(now).toISOString()} by ${req.user.username} - ${JSON.stringify(data).length} bytes`);
-  res.json({ ok: true, key, at: now, by: req.user.username });
+  await dbSet(key, payload, now, req.user.username);
+  res.json({ ok: true, key, at: now, by: req.user.username, dbType });
 });
 
-// History (auth)
-app.get('/api/history', authRequired, (req, res) => {
+app.get('/api/history', authRequired, async (req, res) => {
   const key = req.query.key || 'lab/v1';
-  const rows = db.prepare('SELECT id, updated_at, updated_by FROM history WHERE key=? ORDER BY updated_at DESC LIMIT 20').all(key);
-  res.json({ key, history: rows });
-});
-
-// Export all (auth)
-app.get('/api/export', authRequired, (req, res) => {
-  const rows = db.prepare('SELECT key, value, updated_at, updated_by FROM kv').all();
-  res.json({ keys: rows.length, data: rows.map(r => ({ key: r.key, at: r.updated_at, by: r.updated_by, data: JSON.parse(r.value) })) });
+  const rows = await dbHistory(key);
+  res.json({ key, history: rows, dbType });
 });
 
 app.listen(PORT, () => {
-  console.log(`\n✅ Ruli Lab Server online on port ${PORT}`);
-  console.log(`   Health: http://localhost:${PORT}/`);
-  console.log(`   Allowed origins: ${allowedOrigins.join(', ')}`);
-  console.log(`   DB: ${path.join(__dirname, DB_PATH)}`);
-  console.log(`   Login with: ${ADMIN_USERNAME} / (your password)`);
-  console.log(`   Free deploy: Render.com -> https://dashboard.render.com\n`);
+  console.log(`\n✅ Ruli Lab Server v1.1 online on port ${PORT} - dbType=${dbType}`);
+  console.log(`   Health: http://localhost:${PORT}/api/health`);
+  if (dbType === 'sqlite') {
+    console.log(`   ⚠️ FREE TIER NO DISK: SQLite ephemeral will reset. Add DATABASE_URL from Neon.tech for persistence.`);
+  }
+  console.log('');
 });

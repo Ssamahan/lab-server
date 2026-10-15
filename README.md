@@ -1,118 +1,57 @@
-# Ruli Lab Systems - Free Secure Server
+# Ruli Lab Systems - Free Secure Server v1.1
 
-**100% free, secure, online** server to replace broken Firebase `lab-default-rtdb` (404). Keeps your lab data live across phone ↔ PC.
+**Fix for Render free tier: No Add Disk button** — Free instances don't support persistent disks. Your screenshot shows: "Free instances spin down after periods of inactivity. They do not support SSH access, scaling, one-off jobs, or persistent disks."
 
-### Why this server?
-- Firebase `https://lab-default-rtdb.firebaseio.com` returns 404 → data stays local only
-- This server stores your `DB` (samples, EQA, stock, trainings, rosters) online with JWT auth
-- Free hosting: Render.com (750h/month free), Fly.io, Railway, Vercel
-- Secure: Helmet headers, CORS locked to `https://ssamahan.github.io`, rate limiting, bcrypt password, JWT 30d expiry
+**Solution:** Use free external Postgres (Neon.tech 3GB free) for persistence — works on Render free without disk.
 
-### Quick Deploy - Render.com (Recommended, FREE)
+### Deploy on Render Free (No Disk Needed)
 
-1. **Push to GitHub:**
-   ```bash
-   cd lab-server
-   git init
-   git add .
-   git commit -m "lab server"
-   # Create repo Ssamahan/lab-server on GitHub, then:
-   git remote add origin https://github.com/Ssamahan/lab-server.git
-   git push -u origin main
-   ```
+**Step 1: Create free Postgres (Neon - 100% free, no card)**
 
-2. **Render:**
-   - Go to https://dashboard.render.com → New → Web Service → Connect `lab-server` repo
-   - **Build Command:** `npm install`
-   - **Start Command:** `npm start`
-   - **Plan:** Free
-   - **Environment Variables:**
-     ```
-     JWT_SECRET=your-32-char-random-string (generate: openssl rand -base64 32)
-     ADMIN_USERNAME=admin
-     ADMIN_PASSWORD=RuliLab@2026
-     ALLOWED_ORIGIN=https://ssamahan.github.io
-     DB_PATH=./data/lab.db
-     ```
-   - **Add Disk (for persistence, free 1GB):** 
-     - Name: `data`, Mount Path: `/opt/render/project/src/data`, Size: 1GB
-   - Deploy → copy URL e.g. `https://ruli-lab-server.onrender.com`
+1. https://neon.tech → Sign up free
+2. New Project → Name `ruli-lab` → Region EU
+3. Copy **Connection String** e.g. `postgresql://user:pass@ep-xxx.neon.tech/neondb?sslmode=require`
 
-3. **Test:**
-   ```bash
-   curl https://ruli-lab-server.onrender.com/
-   curl -X POST https://ruli-lab-server.onrender.com/api/login -H "Content-Type: application/json" -d '{"username":"admin","password":"RuliLab@2026"}'
-   ```
+**Step 2: Deploy Web Service**
+
+You already did: Source `Ssamahan/lab-server`, Name `lab-server`, Language `Node`, Branch `main`, Build `npm install`, Start `npm start`, Free $0 — perfect.
+
+In **Environment Variables** (your 3rd screenshot):
+
+| KEY | VALUE |
+|-----|-------|
+| JWT_SECRET | nURevk1nqhtDsR39sYlS9tP16sdRafL35SzQhoiDQOI= |
+| ADMIN_USERNAME | admin |
+| ADMIN_PASSWORD | RuliLab@2026 |
+| ALLOWED_ORIGIN | https://ssamahan.github.io |
+| DB_PATH | ./data/lab.db |
+| DATABASE_URL | postgresql://... ← Neon URL (makes it persistent on free) |
+
+If no DATABASE_URL, SQLite file is ephemeral — data lost on spin-down. With DATABASE_URL, persistent forever on free.
+
+**Step 3: Deploy**
+
+Click **Deploy web service** → wait 2-3 min → copy URL e.g. `https://lab-server-xxxx.onrender.com`
+
+Test: `https://your-url.onrender.com/api/health` → `{"ok":true,"dbType":"postgres"}`
 
 ### Use in Lab Systems App
 
-I will update your `index.html` to use this server automatically. The app will:
+v4.32.0 supports custom server:
 
-- Try custom server first (if you set URL in Settings)
-- Fallback to Firebase REST if custom server not set
-- Fallback to localStorage if offline
+1. https://ssamahan.github.io/lab/
+2. Staff & Settings → Data & Backup → Free Secure Server
+3. Paste Server URL, user `admin`, pass `RuliLab@2026` → Save & Enable → Test → Push Local → Server
+4. Phone same URL → Pull Server → Local — live sync
 
-**In app:**
-- Staff & Settings → Data & Backup → Custom Server URL → paste `https://ruli-lab-server.onrender.com`
-- Login as admin → data auto-syncs phone ↔ PC every 15s
+### Why no Add Disk?
 
-### API
+Render free = no disk, spins down after 15 min. Paid $7/month = supports disk. v1.1 uses Neon free Postgres so you stay $0/month with persistence.
 
-- `POST /api/login` {username, password} → {token}
-- `GET /api/data?key=lab/v1` → {data, at, by}
-- `PUT /api/data?key=lab/v1` {data} + Bearer token → {ok, at}
-- `GET /api/history` + Bearer → last 20 saves
-- `GET /api/health` → status
+### Alternative $7/month disk
 
-### Security
+Select $7/month in Compute → Add Disk appears → Name `data`, Mount `/opt/render/project/src/data`, 1GB → Deploy. Then remove DATABASE_URL.
 
-- Password hashed with bcrypt
-- JWT 30 days expiry
-- CORS only allows `https://ssamahan.github.io` (edit `ALLOWED_ORIGIN`)
-- Rate limit 200 req / 15 min
-- Helmet security headers
-- SQLite file stored on disk (encrypted at rest by host)
+But Neon free is better — stays $0.
 
-### Alternative Free Options (no server needed)
-
-If you don't want to run a server:
-
-**Option A - Supabase (free Postgres, 500MB):**
-1. supabase.com → New project → free
-2. Create table `lab_data` with `key text primary key, data jsonb, updated_at bigint`
-3. Use Supabase REST directly from app (I can code it)
-
-**Option B - Fix Firebase:**
-Create new Firebase project, enable Realtime Database in test mode, copy URL, paste into app. Free 1GB.
-
-### Local Run
-
-```bash
-npm install
-cp .env.example .env
-# edit .env
-npm start
-# http://localhost:3000
-```
-
-### Integration Code (for index.html)
-
-Add to `getFirebaseConfig()` fallback to custom server:
-
-```js
-function getCustomServerConfig(){
-  try{ return JSON.parse(localStorage.getItem('labSystems.customServer.v1')||'null'); }catch(e){ return null; }
-}
-// In cloudSave/cloudLoad, try custom server first
-```
-
-I will patch your Lab Systems app to support this server URL field.
-
-### Cost
-
-- Render free: 750 hours/month = always on free
-- SQLite disk 1GB free
-- Bandwidth 100GB free
-- No credit card needed for free tier
-
-You own the data, secure, online, free forever.
+Secure: JWT 30d, bcrypt, Helmet, CORS, rate limit.

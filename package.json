@@ -1,7 +1,7 @@
 {
   "name": "ruli-lab-server",
-  "version": "1.0.0",
-  "description": "Free secure server for Ruli District Hospital Lab Systems - stores data online with auth, free deploy on Render/Fly/Vercel",
+  "version": "1.1.0",
+  "description": "Free secure server for Ruli District Hospital Lab Systems - free deploy on Render without disk using Neon Postgres free tier",
   "main": "server.js",
   "type": "module",
   "scripts": {
@@ -16,7 +16,8 @@
     "jsonwebtoken": "^9.0.2",
     "bcryptjs": "^2.4.3",
     "better-sqlite3": "^9.1.1",
-    "express-rate-limit": "^7.1.5"
+    "express-rate-limit": "^7.1.5",
+    "pg": "^8.11.3"
   },
   "engines": {
     "node": ">=18"
