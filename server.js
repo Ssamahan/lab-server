@@ -57,8 +57,19 @@ if (DATABASE_URL) {
     const { Pool } = await import('pg');
     pgPool = new Pool({ connectionString: DATABASE_URL, ssl: { rejectUnauthorized: false } });
     await pgPool.query(`
-      CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT, updated_at BIGINT, updated_by TEXT);
-      CREATE TABLE IF NOT EXISTS history (id SERIAL PRIMARY KEY, key TEXT, value TEXT, updated_at BIGINT, updated_by TEXT);
+      CREATE TABLE IF NOT EXISTS kv (
+        key TEXT PRIMARY KEY,
+        value TEXT,
+        updated_at BIGINT,
+        updated_by TEXT
+      );
+      CREATE TABLE IF NOT EXISTS history (
+        id SERIAL PRIMARY KEY,
+        key TEXT,
+        value TEXT,
+        updated_at BIGINT,
+        updated_by TEXT
+      );
     `);
     dbType = 'postgres';
     console.log('✅ Using Postgres (Neon free) - persistent');
@@ -97,7 +108,7 @@ if (!adminHash) adminHash = bcrypt.hashSync(ADMIN_PASSWORD, 10);
 let mailTransporter = null;
 function getMailTransporter() {
   if (mailTransporter) return mailTransporter;
-  if (!EMAIL_USER || !EMAIL_PASS) { console.log('⚠️ Email not configured - set EMAIL_USER and EMAIL_PASS'); return null; }
+  if (!EMAIL_USER || !EMAIL_PASS) { console.log('⚠️ Email not configured'); return null; }
   mailTransporter = nodemailer.createTransport({ host: EMAIL_HOST, port: EMAIL_PORT, secure: EMAIL_PORT === 465, auth: { user: EMAIL_USER, pass: EMAIL_PASS } });
   return mailTransporter;
 }
