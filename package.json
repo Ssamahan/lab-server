@@ -1,7 +1,7 @@
 {
   "name": "ruli-lab-server",
-  "version": "1.1.0",
-  "description": "Free secure server for Ruli District Hospital Lab Systems - free deploy on Render without disk using Neon Postgres free tier",
+  "version": "1.2.0",
+  "description": "Free secure server for Ruli Lab - Render free without native build, uses Neon Postgres",
   "main": "server.js",
   "type": "module",
   "scripts": {
@@ -15,7 +15,6 @@
     "dotenv": "^16.3.1",
     "jsonwebtoken": "^9.0.2",
     "bcryptjs": "^2.4.3",
-    "better-sqlite3": "^9.1.1",
     "express-rate-limit": "^7.1.5",
     "pg": "^8.11.3"
   },
