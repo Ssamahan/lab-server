@@ -1,57 +1,48 @@
-# Ruli Lab Systems - Free Secure Server v1.1
+# Ruli Lab Systems - Free Secure Server v1.3.1 + Equipment PM
 
-**Fix for Render free tier: No Add Disk button** — Free instances don't support persistent disks. Your screenshot shows: "Free instances spin down after periods of inactivity. They do not support SSH access, scaling, one-off jobs, or persistent disks."
+Live: https://lab-server-7hwd.onrender.com - dbType postgres persistent true
 
-**Solution:** Use free external Postgres (Neon.tech 3GB free) for persistence — works on Render free without disk.
+Fixes Render free no disk: Uses Neon free Postgres (3GB free) - no Add Disk button needed (free tier doesn't support disks).
 
-### Deploy on Render Free (No Disk Needed)
+### New in v1.3.1
+- Real Email OTP via Nodemailer free Gmail SMTP - POST /api/send-otp
+- Consumable expiry alerts 10d + equipment PM reminders - POST /api/send-alert to smhnklvn@gmail.com from rulidhlab@gmail.com
+- Equipment module: analyzers with serial, contractor, shipped/returned dates, rented backup
 
-**Step 1: Create free Postgres (Neon - 100% free, no card)**
+### Deploy (your screenshots)
 
-1. https://neon.tech → Sign up free
-2. New Project → Name `ruli-lab` → Region EU
-3. Copy **Connection String** e.g. `postgresql://user:pass@ep-xxx.neon.tech/neondb?sslmode=require`
+You already deployed v1.2.0 successfully Live. Now v1.3.1 adds email.
 
-**Step 2: Deploy Web Service**
+In Render -> Environment -> Add 6 vars KEY|VALUE:
 
-You already did: Source `Ssamahan/lab-server`, Name `lab-server`, Language `Node`, Branch `main`, Build `npm install`, Start `npm start`, Free $0 — perfect.
+JWT_SECRET = nURevk1nqhtDsR39sYlS9tP16sdRafL35SzQhoiDQOI=
+ADMIN_USERNAME = admin
+ADMIN_PASSWORD = RuliLab@2026
+ALLOWED_ORIGIN = https://ssamahan.github.io
+DB_PATH = ./data/lab.json
+DATABASE_URL = postgresql://... Neon URL (persistent)
+EMAIL_HOST = smtp.gmail.com
+EMAIL_PORT = 587
+EMAIL_USER = rulidhlab@gmail.com
+EMAIL_PASS = Gmail App Password 16 chars
+EMAIL_FROM = Ruli Lab Systems <rulidhlab@gmail.com>
 
-In **Environment Variables** (your 3rd screenshot):
+Deploy latest commit -> Manual Deploy -> Deploy.
 
-| KEY | VALUE |
-|-----|-------|
-| JWT_SECRET | nURevk1nqhtDsR39sYlS9tP16sdRafL35SzQhoiDQOI= |
-| ADMIN_USERNAME | admin |
-| ADMIN_PASSWORD | RuliLab@2026 |
-| ALLOWED_ORIGIN | https://ssamahan.github.io |
-| DB_PATH | ./data/lab.db |
-| DATABASE_URL | postgresql://... ← Neon URL (makes it persistent on free) |
+### Lab App v5.2.3
 
-If no DATABASE_URL, SQLite file is ephemeral — data lost on spin-down. With DATABASE_URL, persistent forever on free.
+- Locked to dark mode only web exports light
+- Inter font, module names size like reference
+- Real data no hallucination - samples from referred modules
+- Greeting tailored to admin ssamahan lab manager if logged
+- TAT vs target from referred samples module
+- QC Levey-Jennings combining EQA programs
+- Partner volume from referral module
+- Live activity: annual leave, shipping sample, TAT last 2 days, consumables expiry
+- On duty now from working plan + night duty
+- Equipment fleet from equipment module with serial, contractor, dates, shipped, rented backup
+- Supply radar expiring + expired last 7d
+- All stock links go to source
+- First-run checklist popup ignored
 
-**Step 3: Deploy**
-
-Click **Deploy web service** → wait 2-3 min → copy URL e.g. `https://lab-server-xxxx.onrender.com`
-
-Test: `https://your-url.onrender.com/api/health` → `{"ok":true,"dbType":"postgres"}`
-
-### Use in Lab Systems App
-
-v4.32.0 supports custom server:
-
-1. https://ssamahan.github.io/lab/
-2. Staff & Settings → Data & Backup → Free Secure Server
-3. Paste Server URL, user `admin`, pass `RuliLab@2026` → Save & Enable → Test → Push Local → Server
-4. Phone same URL → Pull Server → Local — live sync
-
-### Why no Add Disk?
-
-Render free = no disk, spins down after 15 min. Paid $7/month = supports disk. v1.1 uses Neon free Postgres so you stay $0/month with persistence.
-
-### Alternative $7/month disk
-
-Select $7/month in Compute → Add Disk appears → Name `data`, Mount `/opt/render/project/src/data`, 1GB → Deploy. Then remove DATABASE_URL.
-
-But Neon free is better — stays $0.
-
-Secure: JWT 30d, bcrypt, Helmet, CORS, rate limit.
+Live at https://ssamahan.github.io/lab/ - v5.2.3
